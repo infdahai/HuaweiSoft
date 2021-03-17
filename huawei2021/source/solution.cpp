@@ -3,38 +3,17 @@
 
 #define STANDSTD_H
 
-/*
-inline bool cmpCore(const Server &a, const Server &b)
-{
-  if (a.core != b.core)
-    return a.core < b.core;
-  return a.mem < b.mem;
-}
-
-inline bool cmpMem(const Server &a, const Server &b)
-{
-  if (a.mem != b.mem)
-    return a.mem < b.mem;
-  return a.core < b.core;
-}
-*/
-
-const float magicNumber = 1.2; // 1.18 more exactly
-
 inline bool cmpMagic(const Server &a, const Server &b)
 {
-  float i = a.mem + magicNumber * a.core;
-  float j = a.mem + magicNumber * b.core;
-  return i < j;
+  return a.CmptNum > b.CmptNum;
+}
+inline bool cmpVM(const VMA *a, const VMA *b)
+{
+  return a->magicVal > b->magicVal;
 }
 
-int main()
+inline void ReadStdin()
 {
-  // std::ios::sync_with_stdio(false);
-  //  std::cin.tie(0);
-
-#ifdef STANDSTD_H
-
   scanf("%d", &n);
   for (int i = 1; i <= n; i++)
   {
@@ -42,6 +21,8 @@ int main()
     scanf(" (%20[a-z|A-Z|0-9], %d, %d, %d, %d)", sersps[i].name, &sers[i].core,
           &sers[i].mem, &sersps[i].costo, &sersps[i].costd);
     sersps[i].len = strlen(sersps[i].name);
+
+    sers[i].CmptNum = sers[i].core * magicNum + sers[i].mem;
   }
   scanf("%d", &m);
   for (int i = 1; i <= m; i++)
@@ -50,6 +31,7 @@ int main()
     scanf(" (%20[a-z|A-Z|0-9.], %d, %d, %d)", vmname[i], &vms[i].core,
           &vms[i].mem, &vms[i].type);
     vms[i].len = strlen(vmname[i]);
+    vms[i].magicVal = magicNum * vms[i].core + vms[i].mem;
     vmHashTable[string(vmname[i], vms[i].len)] = i;
   }
   scanf("%d", &t);
@@ -73,38 +55,48 @@ int main()
         scanf("%*c, %20[a-z|A-Z|0-9.], %d)", tmps, &tmp_vmid);
         int len = strlen(tmps);
         int nameid = vmHashTable[string(tmps, len)];
+        VMA *tmpp = new VMA(tmp_vmid, &vms[nameid]);
+        vms_alive_hash[tmp_vmid] = tmpp;
         reqs[tmpk].type = true;
-        vms_alive[tmp_vmid] = VM_Alive(tmp_vmid, &vms[nameid]);
-        reqs[tmpk].vma_ptr = &vms_alive[tmp_vmid];
+        reqs[tmpk].vma_ptr = tmpp;
+        reqs[tmpk].type = tmpp->type;
       }
       else
       {
         scanf("%*c, %d)", &tmp_vmid);
         reqs[tmpk].type = false;
-        reqs[tmpk].vma_ptr = &vms_alive[tmp_vmid];
+        reqs[tmpk].vma_ptr = vms_alive_hash[tmp_vmid];
+        reqs[tmpk].vmsd = vms_alive_hash[tmp_vmid]->type;
       }
       tmpk++;
     }
 
     ReqDay[j].req_end_day = tmpk;
   }
-#else
+}
 
-#endif
-
+inline void getGlobalVal()
+{
   auto req_ptr = reqs + 1;
-  VM_Alive *tmp_vma_ptr;
+  VMA *tmp_vma_ptr;
   VM *tmp_vm_ptr;
   for (int i = 1; i <= t; i++)
   {
-    int pos_d, pos_s;
+    memd_day[i] += memd_day[i - 1];
+    cored_day[i] += cored_day[i - 1];
+    for (int k = 0; k < 2; k++)
+    {
+      mems_day[i][k] += mems_day[i - 1][k];
+      cores_day[i][k] += cores_day[i - 1][k];
+    }
+    int pos_d = 0, pos_s = 0;
     for (int j = 1; j <= ReqDay[i].req_times; j++)
     {
       tmp_vma_ptr = req_ptr->vma_ptr;
       auto &tmp_vm_ptr = *(tmp_vma_ptr->vm_ptr);
       if (req_ptr->type)
       {
-        if (tmp_vm_ptr.type)
+        if (req_ptr->vmsd)
         {
           memd_day[i] += tmp_vm_ptr.mem;
           cored_day[i] += tmp_vm_ptr.core;
@@ -114,7 +106,6 @@ int main()
             pos_d = j;
           }
           if (cored_add_max[i] < cored_day[i])
-          // really need the judgement ??
           {
             cored_add_max[i] = cored_day[i];
             pos_d = j;
@@ -122,8 +113,9 @@ int main()
         }
         else
         {
-          int tmpa = (mems_day[i][1] - mems_day[i][0]) + (cores_day[i][1] - cores_day[i][0]) * magicNumber;
-          if (tmpa > 0)
+          int tmpf = (mems_day[i][1] - mems_day[i][0]) +
+                     (cores_day[i][1] - cores_day[i][0]) * magicNum;
+          if (tmpf > 0)
           {
             tmp_vma_ptr->pos = 0;
             mems_day[i][0] += tmp_vm_ptr.mem;
@@ -159,7 +151,7 @@ int main()
       }
       else
       {
-        if (tmp_vm_ptr.type)
+        if (req_ptr->vmsd)
         {
           memd_day[i] -= tmp_vm_ptr.mem;
           cored_day[i] -= tmp_vm_ptr.core;
@@ -173,52 +165,347 @@ int main()
       }
       req_ptr++;
     }
-    ReqDay[i].req_max_pos = max(pos_d, pos_s) - 1;
+    ReqDay[i].req_max_pos = max(pos_d, pos_s);
     globalMemD = max(globalMemD, memd_add_max[i]);
     globalMemS = max(globalMemS, max(mems_add_max[i][0], mems_add_max[i][1]));
-    int tmpv = globalMemD / 2 + globalMemS;
-    if (globalMemSum < tmpv)
+    if (globalMemMD < globalMemD)
     {
-      globalMemSum = tmpv;
-      t_max = i;
+      globalMemMD = globalMemD;
+      t_maxd = i;
     }
-    /*
-    globalCoreD = max(globalCoreD, cored_add_max[i]);
-    globalCoreS = max(globalCoreS, max(cores_add_max[i][0], cores_add_max[i][1]));
-    globalCoreSum = max(globalCoreSum, globalCoreD / 2 + globalCoreS);
-    */
+    if (globalMemMS < globalMemS)
+    {
+      globalMemMS = globalMemS;
+      t_maxs = i;
+    }
+  }
+}
+
+inline int findLocD(VMA *vma)
+{
+  int core_need = vma->vm_ptr->core / 2;
+  int mem_need = vma->vm_ptr->mem / 2;
+  for (auto s : sers_alive_rbd)
+  {
+    SA *sa = s.first;
+    int serid = s.second;
+    if (core_need <= sa->hole[0].core_remain && mem_need <= sa->hole[0].mem_remain)
+    {
+      sa->update(core_need, mem_need, 2);
+      int res = sa->server_id;
+      vma->ser_id = res;
+      return res;
+    }
+  }
+  return -1;
+}
+inline tuple<int, int> findLocS(VMA *vma)
+{
+  // return {server_id, pos}
+  int core_need = vma->vm_ptr->core;
+  int mem_need = vma->vm_ptr->mem;
+  for (auto s : sers_alive_rbs)
+  {
+    SA *sa = s.first;
+    int serid = s.second;
+    for (int i = 0; i < 2; i++)
+    {
+      if (core_need <= sa->hole[i].core_remain && mem_need <= sa->hole[i].mem_remain)
+      {
+        sa->update(core_need, mem_need, i);
+        int res = sa->server_id;
+        vma->ser_id = res;
+        vma->pos = i;
+        return {res, i};
+      }
+    }
   }
 
+  return {-1, 0};
+}
+
+inline int binarySerch(float magicNeed, int coren, int memn, int cas)
+{
+  // return rank_id
+  int l = 1, h = n;
+  int res;
+  if (magicNeed < sers[n].CmptNum)
+  {
+    h = n;
+  }
+  else
+  {
+    while (l < h)
+    {
+      int mid = (l + h) >> 1;
+      if (sers[mid].CmptNum > magicNeed)
+      {
+        l = mid + 1;
+      }
+      else
+      {
+        h = mid;
+      }
+    }
+  }
+  if (cas)
+  {
+    for (int j = h; j >= 1; j--)
+    {
+      if (sers[j].core >= coren && sers[j].mem >= memn)
+      {
+        return j;
+      }
+    }
+  }
+  else
+  {
+    for (int j = h; j >= 1; j--)
+    {
+      if ((sers[j].core >> 1) >= coren && (sers[j].mem >> 1) >= memn)
+      {
+        return j;
+      }
+    }
+  }
+
+  return 1;
+}
+
+inline int buyComp(vector<VMA *> &adList, int loc, int cas, ProcessStr &prostr)
+// 0s1d
+{
+  float magicNeed;
+  int coren, memn;
+  if (cas)
+  {
+    for (int i = loc; i <= adList.size(); i++)
+    {
+      magicNeed += adList[i]->magicVal;
+      coren += adList[i]->vm_ptr->core;
+      memn += adList[i]->vm_ptr->mem;
+    }
+  }
+  else
+  {
+    int core1, core2, mem1, mem2;
+    for (int i = loc; i <= adList.size(); i++)
+    {
+      magicNeed += adList[i]->magicVal;
+      if (core1 < core2)
+        core1 += adList[i]->vm_ptr->core;
+      else
+        core2 += adList[i]->vm_ptr->core;
+      if (mem1 < mem2)
+        mem1 += adList[i]->vm_ptr->mem;
+      else
+        mem2 += adList[i]->vm_ptr->mem;
+    }
+    coren = max(core1, core2);
+    memn = max(mem1, mem2);
+  }
+
+  int M1Num = magicNeed / M1Ser;
+  if (M1Num)
+  {
+    prostr.ServerPool[1] += M1Num;
+    for (int i = 1; i <= M1Num; i++)
+    {
+      SA *tmpp = new Server_Alive(idSerCur, 1, 1);
+      sers_alive_hash[idSerCur] = tmpp;
+      if (cas)
+      {
+        sers_alive_rbd[tmpp] = idSerCur;
+      }
+      else
+      {
+        sers_alive_rbs[tmpp] = idSerCur;
+      }
+      idSerCur++;
+    }
+  }
+  else
+  {
+    int raid = binarySerch(magicNeed, coren, memn, cas);
+    prostr.ServerPool[raid]++;
+    SA *tmpp = new Server_Alive(idSerCur, raid, 1);
+    sers_alive_hash[idSerCur] = tmpp;
+    if (cas)
+    {
+      sers_alive_rbd[tmpp] = idSerCur;
+    }
+    else
+    {
+      sers_alive_rbs[tmpp] = idSerCur;
+    }
+    idSerCur++;
+  }
+
+  return 0;
+}
+
+inline void DelVMA(VMA *elem)
+{
+  int ser_id = elem->ser_id;
+  int coreq = elem->vm_ptr->core;
+  int memq = elem->vm_ptr->mem;
+
+  if (elem->type)
+  {
+    sers_alive_hash[ser_id]->del(coreq, memq, 2);
+    vms_alive_rbd.erase(elem);
+  }
+  else
+  {
+    int pos = elem->pos;
+    sers_alive_hash[ser_id]->del(coreq, memq, pos);
+    vms_alive_rbs.erase(elem);
+  }
+  //   vms_alive_hash.erase(elem->vmid);
+  //      delete elem;
+}
+
+int main()
+{
+  // std::ios::sync_with_stdio(false);
+  //  std::cin.tie(0);
+
+#ifdef STANDSTD_H
+  ReadStdin();
+#else
+  freopen("../training-data/training-1.txt", "r", stdin);
+  freopen("../training-data/out.txt", "w", stdout);
+#endif
+  getGlobalVal();
+
   sort(sers + 1, sers + 1 + n, cmpMagic);
+  M1Ser = sers[1].CmptNum;
   for (int i = 1; i <= n; i++)
   {
     sersps[sers[i].nameid].magicRank = i;
   }
-  /*
-  sort(sers + 1, sers + 1 + n, cmpCore);
-  for (int i = 1; i <= n; i++)
-  {
-    sersps[sers[i].nameid].coreRank = i;
-  }
-  sort(sers + 1, sers + 1 + n, cmpMem);
-  for (int i = 1; i <= n; i++)
-  {
-    sersps[sers[i].nameid].memRank = i;
-  }
-  */
 
-  int MaxComputer = globalMemSum / sers[1].mem + 1;
-  // int startComputer = MaxComputer * (t_max / (double)t);
-  int final_day_mem = memd_add_max[t] + max(mems_add_max[t][0], mems_add_max[t][1]);
-  int startComputer = final_day_mem / sers[1].mem + 1;
-  // else locate in Mode num.
+  maxCompD = globalMemMD / sers[1].mem;
+  maxCompS = globalMemMS * 2 / sers[1].mem;
 
+  for (idSerCur = 0; idSerCur < maxCompD; idSerCur++)
+  {
+    SA *tmp_sera = new Server_Alive(idSerCur, 1, 1);
+    sers_alive_hash[idSerCur] = tmp_sera;
+    sers_alive_rbd[tmp_sera] = idSerCur;
+  }
+  for (int i = 0; i < maxCompS; i++, idSerCur++)
+  {
+    SA *tmp_sera = new Server_Alive(idSerCur, 1, 0);
+    sers_alive_hash[idSerCur] = tmp_sera;
+    sers_alive_rbs[tmp_sera] = idSerCur;
+  }
+  PurStr.TypeQ = 1;
+  PurStr.ServerPool[1] = idSerCur;
+
+  auto rq_ptr = &ReqDay[1];
+  Req *reqs_ptr;
   for (int i = 1; i <= t; i++)
   {
-    if (i == 1)
+    ProcessStr proStr;
+    int start_id = rq_ptr->req_start_day;
+    int end_id = rq_ptr->req_end_day;
+    int max_id = rq_ptr->req_max_pos;
+    aliveVM = vms_alive_rbs.size() + vms_alive_rbd.size();
+    // migBound = aliveVM[0] / migDiv;
+    // shuffleBound = aliveVM * shuffleFact;
+
+    vector<VMA *> DelList;
+    vector<VMA *> AddListD, AddListS;
+    reqs_ptr = &reqs[start_id];
+    int j = 1;
+    for (; j <= max_id; j++)
     {
-      printf("(purchase, %d)\n", Q);
+      VMA *tmpp = reqs_ptr->vma_ptr;
+      int vmsd = reqs_ptr->vmsd;
+      if (reqs_ptr->type)
+      {
+        if (vmsd)
+        {
+          vms_alive_rbd[tmpp] = tmpp->vmid;
+          AddListD.push_back(tmpp);
+        }
+        else
+        {
+          vms_alive_rbs[tmpp] = tmpp->vmid;
+          AddListS.push_back(tmpp);
+        }
+      }
+      else
+      {
+        DelList.push_back(tmpp);
+        if (vmsd)
+          vms_alive_rbd.erase(tmpp);
+        else
+          vms_alive_rbs.erase(tmpp);
+      }
+      reqs_ptr++;
     }
+    sort(AddListD.begin(), AddListD.end(), cmpVM);
+    sort(AddListS.begin(), AddListS.end(), cmpVM);
+
+    int indd = 0;
+    while (indd < AddListD.size())
+    {
+      VMA *pvma = AddListD[indd];
+      if (findLocD(pvma) >= 0)
+      {
+        indd++;
+      }
+      else
+      {
+        buyComp(AddListD, indd, 1, proStr);
+      }
+    }
+    int inds = 0;
+    while (inds < AddListS.size())
+    {
+      VMA *pvma = AddListS[inds];
+      auto res = findLocS(pvma);
+      int serId = get<0>(res);
+      int pos = get<1>(res);
+      if (serId >= 0)
+      {
+        inds++;
+      }
+      else
+      {
+        buyComp(AddListS, inds, 0, proStr);
+      }
+    }
+    for (auto elem : DelList)
+    {
+      DelVMA(elem);
+    }
+    proStr.TypeQ = proStr.ServerPool.size();
+    for (; j < end_id; j++)
+    {
+      bool type = reqs_ptr->type;
+      int vmsd = reqs_ptr->vmsd;
+      VMA *pvma = reqs_ptr->vma_ptr;
+      if (type)
+      {
+        if (vmsd)
+        {
+          findLocD(pvma);
+        }
+        else
+        {
+          findLocS(pvma);
+        }
+      }
+      else
+      {
+        DelVMA(pvma);
+      }
+      reqs_ptr++;
+    }
+    proStr.print();
   }
 
   return 0;
