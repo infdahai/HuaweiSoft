@@ -11,12 +11,19 @@
 #include <string>
 #include <vector>
 #include <iterator>
+#include <deque>
+using namespace std;
+
+//#define CHRONO_TIMEH
+#ifdef CHRONO_TIMEH
+#include <chrono>
+using namespace chrono;
+#endif
 
 const int intSize = sizeof(int);
 struct VM_Alive;
 struct Server_Alive;
 
-using namespace std;
 using ull = unsigned long long;
 using VMA = VM_Alive;
 using SA = Server_Alive;
@@ -129,8 +136,8 @@ struct Cmp_SerAD
 {
     bool operator()(const SA *lhs, const SA *rhs)
     {
-        if (lhs->rankid != rhs->rankid)
-            return lhs->rankid < rhs->rankid;
+        //    if (lhs->rankid != rhs->rankid)
+        //       return lhs->rankid < rhs->rankid;
         auto &lh = lhs->hole[0];
         int lcore = lh.core_remain;
         int lmem = lh.mem_remain;
@@ -145,8 +152,8 @@ struct Cmp_SerAS
 {
     bool operator()(const SA *lhs_p, const SA *rhs_p)
     {
-        if (lhs_p->rankid != rhs_p->rankid)
-            return lhs_p->rankid < rhs_p->rankid;
+        //      if (lhs_p->rankid != rhs_p->rankid)
+        //          return lhs_p->rankid < rhs_p->rankid;
         auto &lh0 = lhs_p->hole[0];
         auto &lh1 = lhs_p->hole[1];
         int lcore = lh0.core_remain + lh1.core_remain;
@@ -178,7 +185,8 @@ struct VM_Alive
     int ser_id = -1;
     int pos; // 0 : A, 1 : B
     float magicVal;
-    //   bool lock;   // T : mean original
+    int addReqID;
+    int delReqID;
     VM_Alive(int vmid1, VM *vm_ptr1)
     {
         vmid = vmid1;
@@ -225,30 +233,60 @@ struct _ReqDay
     //  int req_pos_mem;
 } ReqDay[maxm];
 
+struct MigStr
+{
+    /*******
+ *    MigPool
+ *   first: reqID
+ *  second: vmID
+ *  third:  serID
+ *  fourth: enum{ Dual: -1, Single: [A=0, B=1]} 
+ * 
+ * *******/
+    int MigW;
+    vector<string> migStr;
+    vector<int, tuple<int, int, int>> MigPool;
+};
+
 struct ProcessStr
 {
     int TypeQ;
-    int MigW;
 
     /*******
- * ServerPool
+ *  ServerPool
  *  first: Rankid -- Servername
  *  second: Num
  * 
-*
- * MigPool
- *   first: vmID
- *  second: serverID
- *  third:  dict{ Dual: -1, Single: [A=0, B=1]} 
+ * DeployPool
+ * first: reqID
+ * second: serverID
+ * third: enum{ Dual: -1, Single: [A=0, B=1]} 
  * 
 *******/
     unordered_map<int, int> ServerPool;
-    vector<tuple<int, int, int>> MigPool;
-
-    vector<string> buyStr;
-    vector<string> migStr;
-    void print()
+    map<int, tuple<int, int>> DeployPool;
+    void printDeploy()
     {
+        printf("(purchase, %d)\n", TypeQ);
+        for (int i = 1; i <= TypeQ; i++)
+        {
+            // string ser_name;
+        }
+        printf("(migration, 0)\n");
+        for (auto &elem : DeployPool)
+        {
+            auto &el = elem.second;
+            int serID = get<0>(el);
+            int posID = get<1>(el);
+            if (posID < 0)
+            {
+                printf("(%d)\n", serID);
+            }
+            else
+            {
+                printf("(%d, %d)\n", serID, posID);
+            }
+        }
     }
 } PurStr;
 

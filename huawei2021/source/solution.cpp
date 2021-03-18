@@ -56,6 +56,7 @@ inline void ReadStdin()
         int len = strlen(tmps);
         int nameid = vmHashTable[string(tmps, len)];
         VMA *tmpp = new VMA(tmp_vmid, &vms[nameid]);
+        tmpp->addReqID = i;
         vms_alive_hash[tmp_vmid] = tmpp;
         reqs[tmpk].type = true;
         reqs[tmpk].vma_ptr = tmpp;
@@ -65,7 +66,8 @@ inline void ReadStdin()
       {
         scanf("%*c, %d)", &tmp_vmid);
         reqs[tmpk].type = false;
-        reqs[tmpk].vma_ptr = vms_alive_hash[tmp_vmid];
+        VMA *tmpp = vms_alive_hash[tmp_vmid];
+        reqs[tmpk].vma_ptr = tmpp;
         reqs[tmpk].vmsd = vms_alive_hash[tmp_vmid]->type;
       }
       tmpk++;
@@ -181,7 +183,7 @@ inline void getGlobalVal()
   }
 }
 
-inline int findLocD(VMA *vma)
+inline int findLocD(VMA *vma, ProcessStr &proStr)
 {
   int core_need = vma->vm_ptr->core / 2;
   int mem_need = vma->vm_ptr->mem / 2;
@@ -194,12 +196,13 @@ inline int findLocD(VMA *vma)
       sa->update(core_need, mem_need, 2);
       int res = sa->server_id;
       vma->ser_id = res;
+      proStr.DeployPool[vma->addReqID] = {res, -1};
       return res;
     }
   }
   return -1;
 }
-inline tuple<int, int> findLocS(VMA *vma)
+inline tuple<int, int> findLocS(VMA *vma, ProcessStr &proStr)
 {
   // return {server_id, pos}
   int core_need = vma->vm_ptr->core;
@@ -216,6 +219,7 @@ inline tuple<int, int> findLocS(VMA *vma)
         int res = sa->server_id;
         vma->ser_id = res;
         vma->pos = i;
+        proStr.DeployPool[vma->addReqID] = {res, i};
         return {res, i};
       }
     }
@@ -340,6 +344,7 @@ inline int buyComp(vector<VMA *> &adList, int loc, int cas, ProcessStr &prostr)
     }
     idSerCur++;
   }
+  prostr.TypeQ++;
 
   return 0;
 }
@@ -352,24 +357,37 @@ inline void DelVMA(VMA *elem)
 
   if (elem->type)
   {
-    sers_alive_hash[ser_id]->del(coreq, memq, 2);
+    sers_alive_hash[ser_id]->del(coreq / 2, memq / 2, 2);
     vms_alive_rbd.erase(elem);
   }
   else
   {
-    int pos = elem->pos;
-    sers_alive_hash[ser_id]->del(coreq, memq, pos);
+    sers_alive_hash[ser_id]->del(coreq, memq, elem->pos);
     vms_alive_rbs.erase(elem);
   }
   //   vms_alive_hash.erase(elem->vmid);
-  //      delete elem;
+  delete elem;
+}
+
+inline void MigrateD()
+{
+  aliveVM = vms_alive_rbs.size() + vms_alive_rbd.size();
+  int migCount = aliveVM / migDiv;
+}
+
+inline void MigrateS()
+{
+  aliveVM = vms_alive_rbs.size() + vms_alive_rbd.size();
+  int migCount = aliveVM / migDiv;
 }
 
 int main()
 {
-  // std::ios::sync_with_stdio(false);
-  //  std::cin.tie(0);
-
+// std::ios::sync_with_stdio(false);
+//  std::cin.tie(0);
+#ifdef CHRONO_TIMEH
+  auto start = system_clock::now();
+#endif
 #ifdef STANDSTD_H
   ReadStdin();
 #else
@@ -411,14 +429,14 @@ int main()
     int start_id = rq_ptr->req_start_day;
     int end_id = rq_ptr->req_end_day;
     int max_id = rq_ptr->req_max_pos;
-    aliveVM = vms_alive_rbs.size() + vms_alive_rbd.size();
-    // migBound = aliveVM[0] / migDiv;
     // shuffleBound = aliveVM * shuffleFact;
 
-    vector<VMA *> DelList;
+    deque<VMA *> DelListS, DelListD;
     vector<VMA *> AddListD, AddListS;
     reqs_ptr = &reqs[start_id];
     int j = 1;
+    int indD = 0;
+    int indS = 0;
     for (; j <= max_id; j++)
     {
       VMA *tmpp = reqs_ptr->vma_ptr;
@@ -427,61 +445,93 @@ int main()
       {
         if (vmsd)
         {
+          indD++;
           vms_alive_rbd[tmpp] = tmpp->vmid;
-          AddListD.push_back(tmpp);
+          AddListD.emplace_back(tmpp);
         }
         else
         {
+          indS++;
           vms_alive_rbs[tmpp] = tmpp->vmid;
-          AddListS.push_back(tmpp);
+          AddListS.emplace_back(tmpp);
         }
       }
       else
       {
-        DelList.push_back(tmpp);
         if (vmsd)
-          vms_alive_rbd.erase(tmpp);
+        {
+          indD++;
+          tmpp->delReqID = indD;
+          DelListD.emplace_back(tmpp);
+        }
         else
-          vms_alive_rbs.erase(tmpp);
+        {
+          indS++;
+          tmpp->delReqID = indS;
+          DelListS.emplace_back(tmpp);
+        }
       }
       reqs_ptr++;
     }
     sort(AddListD.begin(), AddListD.end(), cmpVM);
     sort(AddListS.begin(), AddListS.end(), cmpVM);
 
-    int indd = 0;
+    int indd = 0, AllOps = 0;
     while (indd < AddListD.size())
     {
       VMA *pvma = AddListD[indd];
-      if (findLocD(pvma) >= 0)
+      if (findLocD(pvma, proStr) >= 0)
       {
-        indd++;
+        indd++, AllOps++;
       }
       else
       {
-        buyComp(AddListD, indd, 1, proStr);
+        if (!DelListD.empty() && DelListD[0]->delReqID <= AllOps + 1)
+        {
+          DelVMA(DelListD[0]);
+          AllOps++;
+          DelListD.pop_front();
+        }
+        else
+        {
+          buyComp(AddListD, indd, 1, proStr);
+        }
       }
     }
     int inds = 0;
+    AllOps = 0;
     while (inds < AddListS.size())
     {
       VMA *pvma = AddListS[inds];
-      auto res = findLocS(pvma);
+      auto res = findLocS(pvma, proStr);
       int serId = get<0>(res);
       int pos = get<1>(res);
       if (serId >= 0)
       {
         inds++;
+        AllOps++;
       }
       else
       {
-        buyComp(AddListS, inds, 0, proStr);
+        if (!DelListS.empty() && DelListS[0]->delReqID <= AllOps + 1)
+        {
+          DelVMA(DelListS[0]);
+          AllOps++;
+          DelListS.pop_front();
+        }
+        else
+          buyComp(AddListS, inds, 0, proStr);
       }
     }
-    for (auto elem : DelList)
+    for (auto elem : DelListD)
     {
       DelVMA(elem);
     }
+    for (auto elem : DelListS)
+    {
+      DelVMA(elem);
+    }
+
     proStr.TypeQ = proStr.ServerPool.size();
     for (; j < end_id; j++)
     {
@@ -492,11 +542,11 @@ int main()
       {
         if (vmsd)
         {
-          findLocD(pvma);
+          findLocD(pvma, proStr);
         }
         else
         {
-          findLocS(pvma);
+          findLocS(pvma, proStr);
         }
       }
       else
@@ -505,8 +555,16 @@ int main()
       }
       reqs_ptr++;
     }
-    proStr.print();
+    proStr.printDeploy();
   }
+
+#ifdef CHRONO_TIMEH
+  auto end = system_clock::now();
+  auto duration = duration_cast<microseconds>(end - start);
+  cout << "花费了"
+       << double(duration.count()) * microseconds::period::num / microseconds::period::den
+       << "秒" << endl;
+#endif
 
   return 0;
 }
